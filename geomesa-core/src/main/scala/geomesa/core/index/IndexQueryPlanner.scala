@@ -73,35 +73,6 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
     case _    => IndexSchema.everywhen.overlap(interval)
   }
 
-//<<<<<<< HEAD
-//
-//  // Strategy:
-//  // 1. Inspect the query
-//  // 2. Set up the base iterators/scans.
-//  // 3. Set up the rest of the iterator stack.
-//  def getIterator(ds: AccumuloDataStore, query: Query) : CloseableIterator[Entry[Key,Value]] = {
-//
-//    val ff = CommonFactoryFinder.getFilterFactory2
-//    val isDensity = query.getHints.containsKey(BBOX_KEY)
-//    val derivedQuery =
-//      if (isDensity) {
-//=======
-  // As a pre-processing step, we examine the query/filter and split it into multiple queries.
-  // TODO: Work to make the queries non-overlapping.
-//  def getIterator(buildBatchScanner: () => BatchScanner, query: Query) : CloseableIterator[Entry[Key,Value]] = {
-//    val ff = CommonFactoryFinder.getFilterFactory2
-//    val queries: Iterator[Query] =
-//      if(query.getHints.containsKey(BBOX_KEY)) {
-//>>>>>>> accumulo1.5.x/1.x
-//        val env = query.getHints.get(BBOX_KEY).asInstanceOf[ReferencedEnvelope]
-//        val q1 = new Query(featureType.getTypeName, ff.bbox(ff.property(featureType.getGeometryDescriptor.getLocalName), env))
-//        Iterator(DataUtilities.mixQueries(q1, query, "geomesa.mixed.query"))
-//      } else splitQueryOnOrs(query)
-//
-//    queries.flatMap(runQuery(buildBatchScanner, _))
-//  }
-
-
   // As a pre-processing step, we examine the query/filter and split it into multiple queries.
   // TODO: Work to make the queries non-overlapping.
   def getIterator(ds: AccumuloDataStore, query: Query) : CloseableIterator[Entry[Key,Value]] = {
@@ -116,13 +87,12 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
 
     queries.flatMap(runQuery(ds, _, isDensity))
   }
-
   
   def splitQueryOnOrs(query: Query): Iterator[Query] = {
     val originalFilter = query.getFilter
     
     val orSplitter = new OrSplittingFilter
-    val filters = orSplitter.visit(originalFilter, null).asInstanceOf[Seq[Filter]]
+    val filters = orSplitter.visit(originalFilter, null)
 
     filters.map { filter =>
       val q = new Query(query)
@@ -131,13 +101,12 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
     }.toIterator
   }
 
-  // Strategy:
-  // 1. Inspect the query
-  // 2. Set up the base iterators/scans.
-  // 3. Set up the rest of the iterator stack.
+  // Execute a query...if the query contains ONLY an eligible LIKE 
+  // or EQUALTO query then satisfy the query with the attribute index
+  // table...else use the spatio-temporal index table
+  //
+  // If the query is a density query use the spatio-temporal index table only
   private def runQuery(ds: AccumuloDataStore, derivedQuery: Query, isDensity: Boolean) = {
-    val sourceSimpleFeatureType = DataUtilities.encodeType(featureType)
-
     val filterVisitor = new FilterToAccumulo(featureType)
     filterVisitor.visit(derivedQuery) match {
       case isEqualTo: PropertyIsEqualTo if !isDensity =>
@@ -158,8 +127,9 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
 
   type ARange = org.apache.accumulo.core.data.Range
 
-  val WILDCARD = "%"
-  val SINGLE_CHAR = "_"
+  // TODO try to use wildcard values from the Filter itself
+  val MULTICHAR_WILDCARD = "%"
+  val SINGLE_CHAR_WILDCARD = "_"
   val NULLBYTE = Array[Byte](0.toByte)
 
   /* Like queries that can be handled by current reverse index */
@@ -167,13 +137,16 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
 
   /* contains no single character wildcards */
   def containsNoSingles(filter: PropertyIsLike) =
-    !(filter.getLiteral.replace("\\\\", "").replace(s"\\$SINGLE_CHAR", "").contains(SINGLE_CHAR))
+    !(filter.getLiteral.replace("\\\\", "").replace(s"\\$SINGLE_CHAR_WILDCARD", "").contains(SINGLE_CHAR_WILDCARD))
 
   def trailingOnlyWildcard(filter: PropertyIsLike) =
-    (filter.getLiteral.endsWith(WILDCARD) &&
-      filter.getLiteral.indexOf(WILDCARD) == filter.getLiteral.length - WILDCARD.length) ||
-      filter.getLiteral.indexOf(WILDCARD) == -1
+    (filter.getLiteral.endsWith(MULTICHAR_WILDCARD) &&
+      filter.getLiteral.indexOf(MULTICHAR_WILDCARD) == filter.getLiteral.length - MULTICHAR_WILDCARD.length) ||
+      filter.getLiteral.indexOf(MULTICHAR_WILDCARD) == -1
 
+  /**
+   * Get an iterator that performs an eligible LIKE query against the Attribute Index Table
+   */
   def attrIdxLikeQuery(dataStore: AccumuloDataStore,
                        derivedQuery: Query,
                        filter: PropertyIsLike,
@@ -187,19 +160,22 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
     val literal = filter.getLiteral
     // for now use this
     val value =
-      if(literal.endsWith(WILDCARD))
-        literal.substring(0, literal.length - WILDCARD.length)
+      if(literal.endsWith(MULTICHAR_WILDCARD))
+        literal.substring(0, literal.length - MULTICHAR_WILDCARD.length)
       else
         literal
 
     val range = org.apache.accumulo.core.data.Range.prefix(formatAttrIdxRow(prop, value))
 
-    getAttrIdxItr(dataStore, derivedQuery, filterVisitor, range)
+    performAttributeIndexQuery(dataStore, derivedQuery, filterVisitor, range)
   }
 
   def formatAttrIdxRow(prop: String, lit: String) =
     new Text(prop.getBytes(StandardCharsets.UTF_8) ++ NULLBYTE ++ lit.getBytes(StandardCharsets.UTF_8))
 
+  /**
+   * Get an iterator that performs an EqualTo query against the Attribute Index Table
+   */
   def attrIdxEqualToQuery(dataStore: AccumuloDataStore, derivedQuery: Query, filter: PropertyIsEqualTo, filterVisitor: FilterToAccumulo) = {
     val one = filter.getExpression1
     val two = filter.getExpression2
@@ -210,10 +186,13 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
 
     val range = new ARange(formatAttrIdxRow(prop, lit))
 
-    getAttrIdxItr(dataStore, derivedQuery, filterVisitor, range)
+    performAttributeIndexQuery(dataStore, derivedQuery, filterVisitor, range)
   }
 
-  def getAttrIdxItr(dataStore: AccumuloDataStore, derivedQuery: Query, filterVisitor: FilterToAccumulo, range: AccRange) =
+  /**
+   * Perform scan against the Attribute Index Table and get an iterator returning records from the Record table
+   */
+  def performAttributeIndexQuery(dataStore: AccumuloDataStore, derivedQuery: Query, filterVisitor: FilterToAccumulo, range: AccRange) =
     new CloseableIterator[Entry[Key, Value]] {
       val attrScanner = dataStore.createAttrIdxScanner(featureType)
 

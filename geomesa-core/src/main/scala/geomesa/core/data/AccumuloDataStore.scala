@@ -17,19 +17,19 @@
 
 package geomesa.core.data
 
+import java.io.Serializable
+import java.util.{Map => JMap}
+
 import com.typesafe.scalalogging.slf4j.Logging
 import geomesa.core
 import geomesa.core.data.AccumuloFeatureWriter.MapReduceRecordWriter
 import geomesa.core.data.FeatureEncoding.FeatureEncoding
-import geomesa.core.index.Constants
-import geomesa.core.index.IndexSchema
+import geomesa.core.index.{Constants, IndexSchema}
 import geomesa.core.security.AuthorizationsProvider
-import java.io.Serializable
-import java.util.{Map => JMap}
-import java.util.{Map=>JMap}
 import org.apache.accumulo.core.client._
+import org.apache.accumulo.core.client.admin.TimeType
 import org.apache.accumulo.core.client.mock.MockConnector
-import org.apache.accumulo.core.data.{Key, Mutation, Value, Range}
+import org.apache.accumulo.core.data.{Key, Mutation, Range, Value}
 import org.apache.accumulo.core.file.keyfunctor.ColumnFamilyFunctor
 import org.apache.accumulo.core.iterators.user.VersioningIterator
 import org.apache.accumulo.core.security.ColumnVisibility
@@ -41,16 +41,15 @@ import org.geotools.geometry.jts.ReferencedEnvelope
 import org.opengis.feature.simple.SimpleFeatureType
 import org.opengis.filter.Filter
 import org.opengis.referencing.crs.CoordinateReferenceSystem
-import scala.Some
+
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters._
-import org.apache.accumulo.core.client.admin.TimeType
 
 /**
  *
- * @param connector        Accumulo connector
- * @param catalogTable        The name of the Accumulo table contains the various features
- * @param authorizationsProvider   Provides the authorizations used to access data
+ * @param connector Accumulo connector
+ * @param catalogTable Table name in Accumulo to store metadata about featureTypes
+ * @param authorizationsProvider Provides the authorizations used to access data
  * @param writeVisibilities   Visibilities applied to any data written by this store
  *
  *  This class handles DataStores which are stored in Accumulo Tables.  To be clear, one table may
@@ -64,7 +63,14 @@ class AccumuloDataStore(val connector: Connector,
                         val featureEncoding: FeatureEncoding = FeatureEncoding.AVRO)
     extends AbstractDataStore(true) with Logging {
 
-  private val DEFAULT_MAX_SHARD = 99
+  // TODO default to zero shards (needs testing)
+  private val DEFAULT_MAX_SHARD = 3 // 4 shards
+
+  // TODO configurable and lower default
+  private val DEFAULT_STI_SCAN_THREADS = 100
+
+  // TODO configurable and lower default
+  private val DEFAULT_RECORD_SCAN_THREADS = 20
 
   private def buildDefaultSchema(name: String, maxShard: Int) =
     s"%~#s%$maxShard#r%${name}#cstr%0,3#gh%yyyyMMdd#d::%~#s%3,2#gh::%~#s%#id"
@@ -183,13 +189,25 @@ class AccumuloDataStore(val connector: Connector,
     else
       indexSchemaFormat
 
-  // Create the Schema and write it to the metadata catalog for this feature
+  /**
+   * Compute the GeoMesa SpatioTemporal Schema, create tables, and write metadata to catalog
+   *
+   * @param featureType
+   * @param maxShard numerical id of the max shard (creates maxShard + 1 splits)
+   */
   def createSchema(featureType: SimpleFeatureType, maxShard: Int) {
     val computedSchema = computeSchema(getFeatureName(featureType), maxShard)
     createTablesForType(featureType, featureEncoding, maxShard)
     writeMetadata(featureType, featureEncoding, computedSchema)
   }
 
+  /**
+   * GeoTools API createSchema() method for a featureType...creates tables with
+   * DEFAULT_MAX_SHARD + 1 splits. To control the number of splits use the
+   * createSchema(featureType, maxShard) method
+   *
+   * @param featureType
+   */
   override def createSchema(featureType: SimpleFeatureType) = createSchema(featureType, DEFAULT_MAX_SHARD)
 
   /**
@@ -333,7 +351,9 @@ class AccumuloDataStore(val connector: Connector,
       val authString = authorizationsProvider.getAuthorizations.getAuthorizations
                       .map(a => new String(a)).sorted.mkString(",")
       if (!checkWritePermissions(featureName, authString)) {
-        throw new RuntimeException(s"The current user does not have the required authorizations to write $featureName features. Required authorizations: '$visibilities', actual authorizations: '$authString'")
+        throw new RuntimeException(s"The current user does not have the required authorizations to " +
+          s"write $featureName features. Required authorizations: '$visibilities', " +
+          s"actual authorizations: '$authString'")
       }
     }
   }
@@ -379,7 +399,11 @@ class AccumuloDataStore(val connector: Connector,
       result
     })
 
+  /**
+   * Create an Accumulo Scanner to the Catalog table to query Metadata for this store
+   */
   def createCatalogScanner = connector.createScanner(catalogTable, authorizationsProvider.getAuthorizations)
+
   /**
    * Gets metadata by scanning the table, without the local cache
    *
@@ -459,7 +483,6 @@ class AccumuloDataStore(val connector: Connector,
     validateMetadata(featureName)
     new AccumuloFeatureStore(this, featureName)
   }
-
 
   /**
    * Reads the index schema format out of the metadata
@@ -593,14 +616,23 @@ class AccumuloDataStore(val connector: Connector,
 
   override def getUnsupportedFilter(featureName: String, filter: Filter): Filter = Filter.INCLUDE
 
+  /**
+   * Create a BatchScanner for the SpatioTemporal Index Table
+   */
   def createBatchScanner(sft: SimpleFeatureType) =
-    connector.createBatchScanner(getSTIdxTableForType(sft), authorizationsProvider.getAuthorizations, 100)
+    connector.createBatchScanner(getSTIdxTableForType(sft), authorizationsProvider.getAuthorizations, DEFAULT_STI_SCAN_THREADS)
 
+  /**
+   * Create a Scanner for the Attribute Table (Inverted Index Table)
+   */
   def createAttrIdxScanner(sft: SimpleFeatureType) =
     connector.createScanner(getAttrIdxTableForType(sft), authorizationsProvider.getAuthorizations)
 
+  /**
+   * Create a BatchScanner to retrieve only Records (SimpleFeatures)
+   */
   def createRecordScanner(sft: SimpleFeatureType) =
-    connector.createBatchScanner(getRecordTableForType(sft), authorizationsProvider.getAuthorizations, 20)
+    connector.createBatchScanner(getRecordTableForType(sft), authorizationsProvider.getAuthorizations, DEFAULT_RECORD_SCAN_THREADS)
 
   // Accumulo assumes that the failures directory exists.  This function assumes that you have already created it.
   def importDirectory(tableName: String, dir: String, failureDir: String, disableGC: Boolean) {
