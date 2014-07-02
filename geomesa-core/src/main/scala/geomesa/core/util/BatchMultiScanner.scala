@@ -5,7 +5,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import com.google.common.collect.Queues
 import com.typesafe.scalalogging.slf4j.Logging
-import geomesa.core.index.IndexQueryPlanner.CloseableIterator
 import org.apache.accumulo.core.client.{BatchScanner, Scanner}
 import org.apache.accumulo.core.data.{Key, Value, Range => AccRange}
 

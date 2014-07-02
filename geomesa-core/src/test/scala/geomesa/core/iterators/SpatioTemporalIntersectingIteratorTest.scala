@@ -276,9 +276,7 @@ class SpatioTemporalIntersectingIteratorTest extends Specification {
       results.size
     } else itr.size
 
-    // close the scanner
-    bs.close()
-
+    itr.close()
     retval
   }
 

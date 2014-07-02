@@ -82,12 +82,7 @@ class IteratorTriggerTest extends Specification {
         ))
 
       ds.createSchema(testFeatureType)
-      val fs = ds.getFeatureSource(featureName).asInstanceOf[SimpleFeatureStore]
-      //val dataFeatures = convertToSimpleFeatures(entries)
-      //val featureCollection = DataUtilities.collection(dataFeatures)
-      //fs.addFeatures(featureCollection)
-      //fs.getTransaction.commit()
-      fs
+      ds.getFeatureSource(featureName).asInstanceOf[SimpleFeatureStore]
     }
 
     /**
@@ -147,7 +142,7 @@ class IteratorTriggerTest extends Specification {
     def useIndexOnlyIteratorTest(ecqlPred: String, transformText: Array[String]): Boolean = {
       val aQuery = TestTable.sampleQuery(ECQL.toFilter(ecqlPred), transformText)
       val modECQLPred = TestTable.extractReWrittenCQL(aQuery, TestTable.testFeatureType)
-      IteratorTrigger.useIndexOnlyIterator(modECQLPred, aQuery, TestTable.testFeatureTypeSpec)
+      IteratorTrigger.useIndexOnlyIterator(modECQLPred, aQuery, TestTable.testFeatureType)
     }
 
     /**

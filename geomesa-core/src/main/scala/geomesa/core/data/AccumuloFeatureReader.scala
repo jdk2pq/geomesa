@@ -17,6 +17,7 @@
 package geomesa.core.data
 
 import geomesa.core.index._
+import geomesa.core.util.CloseableIterator
 import org.geotools.data.{Query, FeatureReader}
 import org.opengis.feature.simple.{SimpleFeature, SimpleFeatureType}
 
