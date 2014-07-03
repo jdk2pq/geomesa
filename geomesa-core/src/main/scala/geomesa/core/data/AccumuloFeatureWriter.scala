@@ -75,10 +75,17 @@ abstract class AccumuloFeatureWriter(featureType: SimpleFeatureType,
 
   val NULLBYTE = Array[Byte](0.toByte)
   val connector = ds.connector
+  protected val multiIndex    = ds.catalogTableFormat(featureType)
   protected val multiBWWriter = connector.createMultiTableBatchWriter(new BatchWriterConfig)
-  protected val recordWriter  = multiBWWriter.getBatchWriter(ds.getRecordTableForType(featureType))
-  protected val stIdxWriter   = multiBWWriter.getBatchWriter(ds.getSTIdxTableForType(featureType))
-  protected val attrIdxWriter = multiBWWriter.getBatchWriter(ds.getAttrIdxTableForType(featureType))
+  protected val recordWriter  =
+    if(multiIndex)
+      multiBWWriter.getBatchWriter(ds.getRecordTableForType(featureType))
+    else null
+  protected val attrIdxWriter =
+    if(multiIndex)
+      multiBWWriter.getBatchWriter(ds.getAttrIdxTableForType(featureType))
+    else null
+  protected val stIdxWriter = multiBWWriter.getBatchWriter(ds.getSTIdxTableForType(featureType))
 
   def getFeatureType: SimpleFeatureType = featureType
 
@@ -99,9 +106,12 @@ abstract class AccumuloFeatureWriter(featureType: SimpleFeatureType,
 
     // require non-null geometry to write to geomesa (can't index null geo yo!)
     if (toWrite.getDefaultGeometry != null) {
-      writeRecord(toWrite)
+      if(multiIndex) {
+        writeRecord(toWrite)
+        writeAttrIdx(toWrite)
+      }
       writeSTIdx(toWrite)
-      writeAttrIdx(toWrite)
+
     } else {
       logger.warn("Invalid feature to write:  " + DataUtilities.encodeFeature(toWrite))
       List()
@@ -131,6 +141,7 @@ abstract class AccumuloFeatureWriter(featureType: SimpleFeatureType,
   }
 
   case class PutOrDeleteMutation(row: Array[Byte], cf: Text, cq: Text, v: Value)
+
   def getAttrIdxMutations(feature: SimpleFeature, cf: Text) =
     featureType.getAttributeDescriptors.map { attr =>
       val attrName = attr.getLocalName.getBytes(StandardCharsets.UTF_8)
@@ -196,9 +207,11 @@ class ModifyAccumuloFeatureWriter(featureType: SimpleFeatureType,
 
   override def remove() =
     if (original != null) {
-      removeRecord(original)
+      if(multiIndex) {
+        removeRecord(original)
+        removeAttrIdx(original)
+      }
       removeSTIdx(original)
-      removeAttrIdx(original)
     }
 
   private def removeRecord(feature: SimpleFeature) = {

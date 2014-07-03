@@ -48,7 +48,8 @@ import scala.collection.JavaConverters._
 /**
  *
  * @param connector Accumulo connector
- * @param catalogTable Table name in Accumulo to store metadata about featureTypes
+ * @param catalogTable Table name in Accumulo to store metadata about featureTypes. For pre-catalog
+ *                     single-table stores this equates to the spatiotemporal table name
  * @param authorizationsProvider Provides the authorizations used to access data
  * @param writeVisibilities   Visibilities applied to any data written by this store
  *
@@ -100,7 +101,8 @@ class AccumuloDataStore(val connector: Connector,
    */
   private def writeMetadata(sft: SimpleFeatureType,
                             fe: FeatureEncoding,
-                            schemaValue: String): Unit = {
+                            schemaValue: String,
+                            maxShard: Int): Unit = {
 
     val featureName = getFeatureName(sft)
 
@@ -118,12 +120,21 @@ class AccumuloDataStore(val connector: Connector,
     }
     val featureEncodingValue = fe.toString
 
+    // Compute Table names
+    val stIdxTable   = formatStIdxTableName(sft)
+    val attrIdxTable = formatAttrIdxTableName(sft)
+    val recordTable  = formatRecordTableName(sft)
+
     // store each metadata in the associated column family
     val attributeMap = Map(ATTRIBUTES_CF         -> attributesValue,
                            SCHEMA_CF             -> schemaValue,
                            DTGFIELD_CF           -> dtgValue.getOrElse(Constants.SF_PROPERTY_START_TIME),
                            FEATURE_ENCODING_CF   -> featureEncodingValue,
-                           VISIBILITIES_CF       -> writeVisibilities)
+                           VISIBILITIES_CF       -> writeVisibilities,
+                           ST_IDX_TABLE_CF       -> stIdxTable,
+                           ATTR_IDX_TABLE_CF     -> attrIdxTable,
+                           RECORD_TABLE_CF       -> recordTable,
+                           ST_IDX_MAX_SHARD_CF   -> maxShard.toString)
 
     attributeMap.foreach { case (cf, value) =>
       putMetadata(featureName, mutation, cf, value)
@@ -140,33 +151,75 @@ class AccumuloDataStore(val connector: Connector,
     writeMutations(mutation)
   }
 
-
   type KVEntry = JMap.Entry[Key,Value]
 
-  def getRecordTableForType(featureType: SimpleFeatureType) = s"${featureType.getTypeName}_records"
-  def getSTIdxTableForType(featureType: SimpleFeatureType)  = s"${featureType.getTypeName}_st_idx"
-  def getAttrIdxTableForType(featureType: SimpleFeatureType)  = s"${featureType.getTypeName}_attr_idx"
+  private def formatRecordTableName(featureType: SimpleFeatureType) = s"${featureType.getTypeName}_records"
+  private def formatStIdxTableName(featureType: SimpleFeatureType) = s"${featureType.getTypeName}_st_idx"
+  private def formatAttrIdxTableName(featureType: SimpleFeatureType) = s"${featureType.getTypeName}_attr_idx"
+
+  /**
+   * Read Record table name from store metadata
+   */
+  def getRecordTableForType(featureType: SimpleFeatureType) =
+    readMetadataItem(featureType.getTypeName, RECORD_TABLE_CF)
+      .getOrElse(throw new RuntimeException(s"Unable to find required metadata property for $RECORD_TABLE_CF"))
+
+  /**
+   * Read SpatioTemporal Index table name from store metadata
+   */
+  def getSTIdxTableForType(featureType: SimpleFeatureType) =
+    if(catalogTableFormat(featureType))
+      readMetadataItem(featureType.getTypeName, ST_IDX_TABLE_CF)
+        .getOrElse(throw new RuntimeException(s"Unable to find required metadata property for $ST_IDX_TABLE_CF"))
+    else
+      catalogTable
+
+  /**
+   * Read Attribute Index table name from store metadata
+   */
+  def getAttrIdxTableForType(featureType: SimpleFeatureType) =
+    readMetadataItem(featureType.getTypeName, ATTR_IDX_TABLE_CF)
+      .getOrElse(throw new RuntimeException(s"Unable to find required metadata property for $ATTR_IDX_TABLE_CF"))
+
+  /**
+   * Read SpatioTemporal Index table name from store metadata
+   */
+  def getSTIdxMaxShard(featureType: SimpleFeatureType) =
+    readMetadataItem(featureType.getTypeName, ST_IDX_MAX_SHARD_CF)
+      .getOrElse(throw new RuntimeException(s"Unable to find required metadata property for $ST_IDX_MAX_SHARD_CF")).toInt
+
+  /**
+   * Check if this featureType is stored with catalog table format (i.e. a catalog
+   * table with attribute, spatiotemporal, and record tables) or the old style
+   * single spatiotemporal table
+   *
+   * @param featureType
+   * @return true if the storage is catalog-style, false if spatiotemporal table only
+   */
+  def catalogTableFormat(featureType: SimpleFeatureType) =
+    readMetadataItem(featureType.getTypeName, ST_IDX_TABLE_CF).nonEmpty
 
   def createTablesForType(featureType: SimpleFeatureType,
                           featureEncoding: FeatureEncoding,
                           maxShard: Int) {
-    val recordTable       = getRecordTableForType(featureType)
-    val stIdxTable        = getSTIdxTableForType(featureType)
-    val attributeIdxTable = getAttrIdxTableForType(featureType)
+    val stIdxTable   = formatStIdxTableName(featureType)
+    val attrIdxTable = formatAttrIdxTableName(featureType)
+    val recordTable  = formatRecordTableName(featureType)
     
-    List(recordTable, stIdxTable, attributeIdxTable).map { t =>
+    List(recordTable, stIdxTable, attrIdxTable).map { t =>
       if (!tableOps.exists(t)) connector.tableOperations.create(t, true, TimeType.LOGICAL)
     }
 
     if(!connector.isInstanceOf[MockConnector])
-      configureNewTable(maxShard, featureType, stIdxTable, featureEncoding)
+      configureStIdxTable(maxShard, featureType, stIdxTable, featureEncoding)
   }
 
-  def configureNewTable(maxShard: Int,
-                        featureType: SimpleFeatureType,
-                        stIdxTable: String,
-                        fe: FeatureEncoding) {
+  def configureStIdxTable(maxShard: Int,
+                          featureType: SimpleFeatureType,
+                          stIdxTable: String,
+                          fe: FeatureEncoding) {
     val encoder = SimpleFeatureEncoderFactory.createEncoder(fe)
+
     val splits = (1 to maxShard).map { i => s"%0${maxShard.toString.length}d".format(i) }.map(new Text(_))
     tableOps.addSplits(stIdxTable, new java.util.TreeSet(splits))
 
@@ -198,7 +251,7 @@ class AccumuloDataStore(val connector: Connector,
   def createSchema(featureType: SimpleFeatureType, maxShard: Int) {
     val computedSchema = computeSchema(getFeatureName(featureType), maxShard)
     createTablesForType(featureType, featureEncoding, maxShard)
-    writeMetadata(featureType, featureEncoding, computedSchema)
+    writeMetadata(featureType, featureEncoding, computedSchema, maxShard)
   }
 
   /**
@@ -618,21 +671,45 @@ class AccumuloDataStore(val connector: Connector,
 
   /**
    * Create a BatchScanner for the SpatioTemporal Index Table
+   *
+   * @param numThreads number of threads for the BatchScanner
    */
-  def createBatchScanner(sft: SimpleFeatureType) =
-    connector.createBatchScanner(getSTIdxTableForType(sft), authorizationsProvider.getAuthorizations, DEFAULT_STI_SCAN_THREADS)
+  def createBatchScanner(sft: SimpleFeatureType, numThreads: Int): BatchScanner =
+    if(catalogTableFormat(sft))
+      connector.createBatchScanner(getSTIdxTableForType(sft), authorizationsProvider.getAuthorizations,numThreads)
+    else
+      connector.createBatchScanner(catalogTable, authorizationsProvider.getAuthorizations, numThreads)
+
+  /**
+   * Create a BatchScanner for the SpatioTemporal Index Table
+   */
+  def createBatchScanner(sft: SimpleFeatureType): BatchScanner = {
+    val numThreads =
+      if(catalogTableFormat(sft))
+        getSTIdxMaxShard(sft) + 1 // num splits is maxShard + 1
+      else
+        DEFAULT_STI_SCAN_THREADS
+
+    createBatchScanner(sft, numThreads)
+  }
 
   /**
    * Create a Scanner for the Attribute Table (Inverted Index Table)
    */
   def createAttrIdxScanner(sft: SimpleFeatureType) =
-    connector.createScanner(getAttrIdxTableForType(sft), authorizationsProvider.getAuthorizations)
+    if(catalogTableFormat(sft))
+      connector.createScanner(getAttrIdxTableForType(sft), authorizationsProvider.getAuthorizations)
+    else
+      throw new RuntimeException("Cannot create Attribute Index Scanner for old table format")
 
   /**
    * Create a BatchScanner to retrieve only Records (SimpleFeatures)
    */
-  def createRecordScanner(sft: SimpleFeatureType) =
-    connector.createBatchScanner(getRecordTableForType(sft), authorizationsProvider.getAuthorizations, DEFAULT_RECORD_SCAN_THREADS)
+  def createRecordScanner(sft: SimpleFeatureType, numThreads: Int = DEFAULT_RECORD_SCAN_THREADS) =
+    if(catalogTableFormat(sft))
+      connector.createBatchScanner(getRecordTableForType(sft), authorizationsProvider.getAuthorizations, numThreads)
+    else
+      throw new RuntimeException("Cannot create Attribute Index Scanner for old table format")
 
   // Accumulo assumes that the failures directory exists.  This function assumes that you have already created it.
   def importDirectory(tableName: String, dir: String, failureDir: String, disableGC: Boolean) {
