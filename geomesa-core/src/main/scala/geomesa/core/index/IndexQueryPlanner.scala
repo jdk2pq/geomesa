@@ -3,7 +3,6 @@ package geomesa.core.index
 
 import java.nio.charset.StandardCharsets
 import java.util.Map.Entry
-import java.util.{Iterator => JIterator}
 
 import com.google.common.collect.Iterators
 import com.typesafe.scalalogging.slf4j.Logging
@@ -101,11 +100,15 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
     }.toIterator
   }
 
-  // Execute a query...if the query contains ONLY an eligible LIKE 
-  // or EQUALTO query then satisfy the query with the attribute index
-  // table...else use the spatio-temporal index table
-  //
-  // If the query is a density query use the spatio-temporal index table only
+  /**
+   * Helper method to execute a query against an AccumuloDataStore
+   *
+   * If the query contains ONLY an eligible LIKE
+   * or EQUALTO query then satisfy the query with the attribute index
+   * table...else use the spatio-temporal index table
+   *
+   * If the query is a density query use the spatio-temporal index table only
+   */
   private def runQuery(ds: AccumuloDataStore, derivedQuery: Query, isDensity: Boolean) = {
     val filterVisitor = new FilterToAccumulo(featureType)
     filterVisitor.visit(derivedQuery) match {
@@ -125,9 +128,9 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
 
   val iteratorPriority_AttributeIndexFilteringIterator = 10
 
-  type ARange = org.apache.accumulo.core.data.Range
-
   // TODO try to use wildcard values from the Filter itself
+  // Currently pulling the wildcard values from the filter
+  // leads to inconsistent results...so use % as wildcard
   val MULTICHAR_WILDCARD = "%"
   val SINGLE_CHAR_WILDCARD = "_"
   val NULLBYTE = Array[Byte](0.toByte)
@@ -157,17 +160,17 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
       case p: PropertyName => p.getPropertyName
     }
 
+    // Remove the trailing wilcard and create a range prefix
     val literal = filter.getLiteral
-    // for now use this
     val value =
       if(literal.endsWith(MULTICHAR_WILDCARD))
         literal.substring(0, literal.length - MULTICHAR_WILDCARD.length)
       else
         literal
 
-    val range = org.apache.accumulo.core.data.Range.prefix(formatAttrIdxRow(prop, value))
+    val range = AccRange.prefix(formatAttrIdxRow(prop, value))
 
-    performAttributeIndexQuery(dataStore, derivedQuery, filterVisitor, range)
+    attributeIndexQuery(dataStore, derivedQuery, filterVisitor, range)
   }
 
   def formatAttrIdxRow(prop: String, lit: String) =
@@ -176,7 +179,11 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
   /**
    * Get an iterator that performs an EqualTo query against the Attribute Index Table
    */
-  def attrIdxEqualToQuery(dataStore: AccumuloDataStore, derivedQuery: Query, filter: PropertyIsEqualTo, filterVisitor: FilterToAccumulo) = {
+  def attrIdxEqualToQuery(dataStore: AccumuloDataStore,
+                          derivedQuery: Query,
+                          filter: PropertyIsEqualTo,
+                          filterVisitor: FilterToAccumulo) = {
+
     val one = filter.getExpression1
     val two = filter.getExpression2
     val (prop, lit) = (one, two) match {
@@ -184,17 +191,21 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
       case (l: Literal, p: PropertyName) => (p.getPropertyName, l.getValue.toString)
     }
 
-    val range = new ARange(formatAttrIdxRow(prop, lit))
+    val range = new AccRange(formatAttrIdxRow(prop, lit))
 
-    performAttributeIndexQuery(dataStore, derivedQuery, filterVisitor, range)
+    attributeIndexQuery(dataStore, derivedQuery, filterVisitor, range)
   }
 
   /**
    * Perform scan against the Attribute Index Table and get an iterator returning records from the Record table
    */
-  def performAttributeIndexQuery(dataStore: AccumuloDataStore, derivedQuery: Query, filterVisitor: FilterToAccumulo, range: AccRange) =
+  def attributeIndexQuery(dataStore: AccumuloDataStore,
+                          derivedQuery: Query,
+                          filterVisitor: FilterToAccumulo,
+                          range: AccRange) =
     new CloseableIterator[Entry[Key, Value]] {
-      logger.debug(s"Scanning attribute table for feature type ${featureType.getTypeName}")
+
+      logger.trace(s"Scanning attribute table for feature type ${featureType.getTypeName}")
       val attrScanner = dataStore.createAttrIdxScanner(featureType)
 
       val spatialOpt =
@@ -213,7 +224,7 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
         attrScanner.addScanIterator(cfg)
       }
 
-      logger.debug("Range for attribute scan : " + range.toString)
+      logger.trace(s"Attribute Scan Range: ${range.toString}")
       attrScanner.setRange(range)
 
       import scala.collection.JavaConversions._
@@ -239,7 +250,7 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
     }
 
   def stIdxQuery(ds: AccumuloDataStore, query: Query, rewrittenCQL: Filter, filterVisitor: FilterToAccumulo) = {
-    logger.debug(s"Scanning st idx table for feature type ${featureType.getTypeName}")
+    logger.trace(s"Scanning ST index table for feature type ${featureType.getTypeName}")
     val ecql = Option(ECQL.toCQL(rewrittenCQL))
 
     val spatial = filterVisitor.spatialPredicate
@@ -260,7 +271,7 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
     val bs = ds.createBatchScanner(featureType)
     planQuery(bs, filter)
 
-    logger.trace("Configuring batch scanner: " +
+    logger.trace("Configuring batch scanner for ST table: " +
                  "Poly: "+ opoly.getOrElse("No poly")+
                  "Interval: " + oint.getOrElse("No interval")+
                  "Filter: " + Option(filter).getOrElse("No Filter")+
@@ -268,8 +279,6 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
                  "Query: " + Option(query).getOrElse("no query"))
 
     val iteratorConfig = IteratorTrigger.chooseIterator(ecql, query, featureType)
-
-    logger.debug(s"iterator config: iteratorConfig.useSFFI = ${iteratorConfig.useSFFI.toString}, ${iteratorConfig.iterator.getClass.getSimpleName}")
 
     iteratorConfig.iterator match {
       case IndexOnlyIterator  =>
@@ -362,8 +371,6 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
                                               poly: Polygon = null) {
 
     val density: Boolean = query.getHints.containsKey(DENSITY_KEY)
-
-    logger.trace("configure density: "+density)
 
     val clazz =
       if(density) classOf[DensityIterator]

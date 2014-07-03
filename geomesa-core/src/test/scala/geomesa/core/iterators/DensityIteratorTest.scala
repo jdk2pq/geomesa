@@ -47,20 +47,26 @@ import scala.util.Random
 @RunWith(classOf[JUnitRunner])
 class DensityIteratorTest extends Specification {
 
+  sequential
+
   import geomesa.utils.geotools.Conversions._
 
+  val sftName = "DensityIteratorTest"
   val spec = "id:java.lang.Integer,attr:java.lang.Double,dtg:Date,geom:Point:srid=4326"
-  val sft = DataUtilities.createType("test", spec)
+  val sft = DataUtilities.createType(sftName, spec)
   sft.getUserData.put(Constants.SF_PROPERTY_START_TIME, "dtg")
 
   def createDataStore(i: Int = 0): DataStore = {
     val mockInstance = new MockInstance("dummy")
     val c = mockInstance.getConnector("user", new PasswordToken("pass".getBytes))
-    c.tableOperations.create("test")
+    if(c.tableOperations().exists(sftName)){
+      c.tableOperations().delete(sftName)
+    }
+    c.tableOperations.create(sftName)
     val splits = (0 to 99).map {
       s => "%02d".format(s)
     }.map(new Text(_))
-    c.tableOperations().addSplits("test", new java.util.TreeSet[Text](splits))
+    c.tableOperations().addSplits(sftName, new java.util.TreeSet[Text](splits))
 
     val dsf = new AccumuloDataStoreFactory
 
@@ -72,7 +78,7 @@ class DensityIteratorTest extends Specification {
                      instanceIdParam.key -> ("dummy" + i),
                      userParam.key -> "user",
                      passwordParam.key -> "pass",
-                     tableNameParam.key -> "test",
+                     tableNameParam.key -> sftName,
                      mockParam.key -> "true"
                    ))
     ds.createSchema(sft)
@@ -89,14 +95,14 @@ class DensityIteratorTest extends Specification {
         f
     }
 
-    val fs = ds.getFeatureSource("test").asInstanceOf[SimpleFeatureStore]
+    val fs = ds.getFeatureSource(sftName).asInstanceOf[SimpleFeatureStore]
     fs.addFeatures(DataUtilities.collection(features))
     fs.getTransaction.commit()
     fs
   }
 
   def getQuery(query: String): Query = {
-    val q = new Query("test", ECQL.toFilter(query))
+    val q = new Query(sftName, ECQL.toFilter(query))
     val geom = q.getFilter.accept(ExtractBoundsFilterVisitor.BOUNDS_VISITOR, null).asInstanceOf[Envelope]
     q.getHints.put(QueryHints.DENSITY_KEY, java.lang.Boolean.TRUE)
     q.getHints.put(QueryHints.BBOX_KEY, new ReferencedEnvelope(geom, DefaultGeographicCRS.WGS84))

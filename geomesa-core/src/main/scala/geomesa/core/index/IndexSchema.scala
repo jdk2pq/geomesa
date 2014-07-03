@@ -18,8 +18,8 @@ package geomesa.core.index
 
 import java.nio.ByteBuffer
 import java.util.Map.Entry
-import java.util.{Iterator => JIterator}
 
+import com.typesafe.scalalogging.slf4j.Logging
 import com.vividsolutions.jts.geom.{Geometry, Point, Polygon}
 import geomesa.core.data._
 import geomesa.core.index.QueryHints._
@@ -27,7 +27,6 @@ import geomesa.core.iterators._
 import geomesa.core.util._
 import geomesa.utils.text.{WKBUtils, WKTUtils}
 import org.apache.accumulo.core.data.{Key, Value}
-import org.apache.log4j.Logger
 import org.geotools.data.{DataUtilities, Query}
 import org.joda.time.format.DateTimeFormat
 import org.joda.time.{DateTime, DateTimeZone, Interval}
@@ -77,9 +76,7 @@ case class IndexSchema(encoder: IndexEncoder,
                        decoder: IndexEntryDecoder,
                        planner: IndexQueryPlanner,
                        featureType: SimpleFeatureType,
-                       featureEncoder: SimpleFeatureEncoder) {
-
-  private val log = Logger.getLogger(classOf[IndexSchema])
+                       featureEncoder: SimpleFeatureEncoder) extends Logging {
 
   def encode(entry: SimpleFeature, visibility: String = "") = encoder.encode(entry, visibility)
   def decode(key: Key): SimpleFeature = decoder.decode(key)
@@ -96,7 +93,7 @@ case class IndexSchema(encoder: IndexEncoder,
 
   def query(query: Query, ds: AccumuloDataStore): CloseableIterator[SimpleFeature] = {
     // Perform the query
-    if(log.isTraceEnabled) log.trace("Running Query: "+ query.toString)
+    logger.trace(s"Running ${query.toString}")
 
     val accumuloIterator = planner.getIterator(ds, query)
 
