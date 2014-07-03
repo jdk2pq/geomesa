@@ -37,6 +37,7 @@ import geomesa.utils.geotools.GridSnap
 class DensityIterator extends SimpleFeatureFilteringIterator {
 
   import DensityIterator.SparseMatrix
+  import DensityIterator.DENSITY_FEATURE_STRING
 
   var bbox: ReferencedEnvelope = null
   var curRange: ARange = null
@@ -45,6 +46,7 @@ class DensityIterator extends SimpleFeatureFilteringIterator {
   var projectedSFT: SimpleFeatureType = null
   var featureBuilder: SimpleFeatureBuilder = null
   var snap: GridSnap = null
+  var topDensityKey: Option[Key] = None
 
   override def init(source: SortedKeyValueIterator[Key, Value],
                     options: ju.Map[String, String],
@@ -54,22 +56,24 @@ class DensityIterator extends SimpleFeatureFilteringIterator {
     val (w, h) = DensityIterator.getBounds(options)
     snap = new GridSnap(bbox, w, h)
     projectedSFT =
-      DataUtilities.createType(simpleFeatureType.getTypeName, "encodedraster:String,geom:Point:srid=4326")
+      DataUtilities.createType(simpleFeatureType.getTypeName, DENSITY_FEATURE_STRING)
     featureBuilder = new SimpleFeatureBuilder(projectedSFT)
   }
 
   override def next() = {
-    do {
-      if (super.hasTop) {
-        val geom = curFeature.getDefaultGeometry.asInstanceOf[Point]
-        val coord = geom.getCoordinate
-        val x = snap.x(snap.i(coord.x))
-        val y = snap.y(snap.j(coord.y))
-        val cur = Option(result.get(x, y)).getOrElse(0)
-        result.put(x, y, cur + 1)
-        super.next()
-      }
-    } while(nextKey != null && super.hasTop && !curRange.afterEndKey(topKey.followingKey(PartialKey.ROW)))
+    result.clear()
+    super.next()
+    while(super.hasTop && !curRange.afterEndKey(topKey)) {
+      topDensityKey = Some(topKey)
+      val feature = featureEncoder.decode(simpleFeatureType, topValue)
+      val geom = feature.getDefaultGeometry.asInstanceOf[Point]
+      val coord = geom.getCoordinate
+      val x = snap.x(snap.i(coord.x))
+      val y = snap.y(snap.j(coord.y))
+      val cur = Option(result.get(x, y)).getOrElse(0)
+      result.put(x, y, cur + 1)
+      super.next()
+    }
   }
 
   override def seek(range: ARange,
@@ -79,13 +83,15 @@ class DensityIterator extends SimpleFeatureFilteringIterator {
     super.seek(range, columnFamilies, inclusive)
   }
 
+  override def hasTop: Boolean = !result.isEmpty
+
+  override def getTopKey: Key = topDensityKey.getOrElse(null)
+
   override def getTopValue = {
     featureBuilder.reset()
     featureBuilder.add(DensityIterator.encodeSparseMatrix(result))
     featureBuilder.add(curFeature.getDefaultGeometry)
     val feature = featureBuilder.buildFeature(Random.nextString(6))
-    result.clear()
-
     featureEncoder.encode(feature)
   }
 }
@@ -94,6 +100,7 @@ object DensityIterator {
 
   val BBOX_KEY = "geomesa.density.bbox"
   val BOUNDS_KEY = "geomesa.density.bounds"
+  val DENSITY_FEATURE_STRING = "encodedraster:String,geom:Point:srid=4326"
   type SparseMatrix = HashBasedTable[Double, Double, Int]
   val densitySFT = DataUtilities.createType("geomesadensity", "weight:Double,geom:Point:srid=4326")
   val geomFactory = JTSFactoryFinder.getGeometryFactory
@@ -115,7 +122,6 @@ object DensityIterator {
     val Array(w, h) = options.get(BOUNDS_KEY).split(",").map(_.toInt)
     (w, h)
   }
-
 
   def expandFeature(sf: SimpleFeature): Iterable[SimpleFeature] = {
     val builder = new SimpleFeatureBuilder(densitySFT)
