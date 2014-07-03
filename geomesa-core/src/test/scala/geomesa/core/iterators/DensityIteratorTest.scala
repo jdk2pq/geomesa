@@ -17,6 +17,8 @@
 
 package geomesa.core.iterators
 
+import java.util.Date
+
 import com.google.common.collect.HashBasedTable
 
 import collection.JavaConversions._
@@ -48,7 +50,7 @@ class DensityIteratorTest extends Specification {
   val sft = DataUtilities.createType("test", spec)
   sft.getUserData.put(Constants.SF_PROPERTY_START_TIME, "dtg")
 
-  def createDataStore() = {
+  def createDataStore(i: Int = 0): DataStore = {
     val mockInstance = new MockInstance("dummy")
     val c = mockInstance.getConnector("user", new PasswordToken("pass".getBytes))
     c.tableOperations.create("test")
@@ -64,7 +66,7 @@ class DensityIteratorTest extends Specification {
     val ds = dsf.createDataStore(
                 Map(
                      zookeepersParam.key -> "dummy",
-                     instanceIdParam.key -> "dummy",
+                     instanceIdParam.key -> ("dummy" + i),
                      userParam.key -> "user",
                      passwordParam.key -> "pass",
                      tableNameParam.key -> "test",
@@ -74,7 +76,7 @@ class DensityIteratorTest extends Specification {
     ds
   }
 
-  def loadFeatures(ds: DataStore, encodedFeatures: Array[_<:Array[_]]) = {
+  def loadFeatures(ds: DataStore, encodedFeatures: Array[_<:Array[_]]): SimpleFeatureStore = {
     val builder = new SimpleFeatureBuilder(sft)
     val features = encodedFeatures.map {
       e =>
@@ -93,11 +95,39 @@ class DensityIteratorTest extends Specification {
   "DensityIterator" should {
     "compute densities" in {
 
-      val ds = createDataStore()
+      val ds = createDataStore(0)
 
       val encodedFeatures = (0 until 150).toArray.map {
         i =>
           Array(s"$i", "1.0", new DateTime("2012-01-01T19:00:00", DateTimeZone.UTC).toDate, "POINT(-77 38)")
+      }
+
+      val fs = loadFeatures(ds, encodedFeatures)
+
+      val q = new Query("test", ECQL.toFilter("(dtg between '2012-01-01T18:00:00.000Z' AND '2012-01-01T23:00:00.000Z') and BBOX(geom, -80, 33, -70, 40)"))
+      val geom = q.getFilter.accept(ExtractBoundsFilterVisitor.BOUNDS_VISITOR, null).asInstanceOf[Envelope]
+      q.getHints.put(QueryHints.DENSITY_KEY, java.lang.Boolean.TRUE)
+      q.getHints.put(QueryHints.BBOX_KEY, new ReferencedEnvelope(geom, DefaultGeographicCRS.WGS84))
+      q.getHints.put(QueryHints.WIDTH_KEY, 600)
+      q.getHints.put(QueryHints.HEIGHT_KEY, 600)
+      val results = fs.getFeatures(q)
+
+      val iter = results.features().toList
+      iter must not beNull
+
+      val total = iter.map(_.getAttribute("weight").asInstanceOf[Double]).sum
+
+      total should be equalTo 150
+    }
+
+    "compute densities irrespective of dates" in {
+
+      val ds = createDataStore(1)
+
+      val encodedFeatures = (0 until 150).toArray.map {
+        i =>
+          val date = new DateTime("2012-01-01T19:00:00", DateTimeZone.UTC).toDate
+          Array(s"$i", "1.0", new Date(date.getTime + i * 60000), "POINT(-77 38)")
       }
 
       val fs = loadFeatures(ds, encodedFeatures)
