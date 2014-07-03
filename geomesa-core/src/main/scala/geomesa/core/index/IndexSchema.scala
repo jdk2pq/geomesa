@@ -16,30 +16,26 @@
 
 package geomesa.core.index
 
+import java.nio.ByteBuffer
+import java.util.Map.Entry
+import java.util.{Iterator => JIterator}
+
 import com.vividsolutions.jts.geom.{Geometry, Point, Polygon}
 import geomesa.core.data._
 import geomesa.core.index.QueryHints._
 import geomesa.core.iterators._
 import geomesa.core.util._
 import geomesa.utils.text.{WKBUtils, WKTUtils}
-import java.nio.ByteBuffer
-import java.util.Map.Entry
-import java.util.{Iterator => JIterator}
-import org.apache.accumulo.core.client.BatchScanner
-import org.apache.accumulo.core.data.Key
-import org.apache.accumulo.core.data.Value
-import org.apache.log4j.Logger
 import org.apache.accumulo.core.data.{Key, Value}
+import org.apache.log4j.Logger
 import org.geotools.data.{DataUtilities, Query}
 import org.joda.time.format.DateTimeFormat
 import org.joda.time.{DateTime, DateTimeZone, Interval}
 import org.opengis.feature.simple.{SimpleFeature, SimpleFeatureType}
+
 import scala.annotation.tailrec
 import scala.util.parsing.combinator.RegexParsers
-import java.nio.charset.StandardCharsets
-import org.apache.hadoop.io.Text
-import org.opengis.filter.expression.{Literal, PropertyName}
-import org.opengis.filter.PropertyIsEqualTo
+
 
 // A secondary index consists of interleaved elements of a composite key stored in
 // Accumulo's key (row, column family, and column qualifier)
@@ -100,6 +96,8 @@ case class IndexSchema(encoder: IndexEncoder,
 
   def query(query: Query, ds: AccumuloDataStore): CloseableIterator[SimpleFeature] = {
     // Perform the query
+    if(log.isTraceEnabled) log.trace("Running Query: "+ query.toString)
+
     val accumuloIterator = planner.getIterator(ds, query)
 
     // Convert Accumulo results to SimpleFeatures.

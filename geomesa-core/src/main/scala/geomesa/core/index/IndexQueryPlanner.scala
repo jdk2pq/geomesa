@@ -85,6 +85,9 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
         Iterator(DataUtilities.mixQueries(q1, query, "geomesa.mixed.query"))
       } else splitQueryOnOrs(query)
 
+    logger.debug(s"queries size ${queries.size}")
+    queries.foreach { q => logger.debug(q.toString)}
+
     queries.flatMap(runQuery(ds, _, isDensity))
   }
   
@@ -194,6 +197,7 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
    */
   def performAttributeIndexQuery(dataStore: AccumuloDataStore, derivedQuery: Query, filterVisitor: FilterToAccumulo, range: AccRange) =
     new CloseableIterator[Entry[Key, Value]] {
+      logger.debug(s"Scanning attribute table for feature type ${featureType.getTypeName}")
       val attrScanner = dataStore.createAttrIdxScanner(featureType)
 
       val spatialOpt =
@@ -238,7 +242,7 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
     }
 
   def stIdxQuery(ds: AccumuloDataStore, query: Query, rewrittenCQL: Filter, filterVisitor: FilterToAccumulo) = {
-
+    logger.debug(s"Scanning st idx table for feature type ${featureType.getTypeName}")
     val ecql = Option(ECQL.toCQL(rewrittenCQL))
 
     val spatial = filterVisitor.spatialPredicate
@@ -267,6 +271,8 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
                  "Query: " + Option(query).getOrElse("no query"))
 
     val iteratorConfig = IteratorTrigger.chooseIterator(ecql, query, featureType)
+
+    logger.debug(s"iterator config: iteratorConfig.useSFFI = ${iteratorConfig.useSFFI.toString}, ${iteratorConfig.iterator.getClass.getSimpleName}")
 
     iteratorConfig.iterator match {
       case IndexOnlyIterator  =>
@@ -359,6 +365,8 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
                                               poly: Polygon = null) {
 
     val density: Boolean = query.getHints.containsKey(DENSITY_KEY)
+
+    logger.trace("configure density: "+density)
 
     val clazz =
       if(density) classOf[DensityIterator]

@@ -65,7 +65,7 @@ class AccumuloDataStore(val connector: Connector,
     extends AbstractDataStore(true) with Logging {
 
   // TODO default to zero shards (needs testing)
-  private val DEFAULT_MAX_SHARD = 3 // 4 shards
+  private val DEFAULT_MAX_SHARD = 99
 
   // TODO configurable and lower default
   private val DEFAULT_STI_SCAN_THREADS = 100
@@ -676,7 +676,7 @@ class AccumuloDataStore(val connector: Connector,
    */
   def createBatchScanner(sft: SimpleFeatureType, numThreads: Int): BatchScanner =
     if(catalogTableFormat(sft))
-      connector.createBatchScanner(getSTIdxTableForType(sft), authorizationsProvider.getAuthorizations,numThreads)
+      connector.createBatchScanner(getSTIdxTableForType(sft), authorizationsProvider.getAuthorizations, numThreads)
     else
       connector.createBatchScanner(catalogTable, authorizationsProvider.getAuthorizations, numThreads)
 
