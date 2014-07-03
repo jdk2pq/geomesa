@@ -85,9 +85,6 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
         Iterator(DataUtilities.mixQueries(q1, query, "geomesa.mixed.query"))
       } else splitQueryOnOrs(query)
 
-    logger.debug(s"queries size ${queries.size}")
-    queries.foreach { q => logger.debug(q.toString)}
-
     queries.flatMap(runQuery(ds, _, isDensity))
   }
   
