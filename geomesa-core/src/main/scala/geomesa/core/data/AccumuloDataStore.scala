@@ -119,22 +119,22 @@ class AccumuloDataStore(val connector: Connector,
         None
     }
     val featureEncodingValue = fe.toString
-
-    // Compute Table names
-    val stIdxTable   = formatStIdxTableName(sft)
-    val attrIdxTable = formatAttrIdxTableName(sft)
-    val recordTable  = formatRecordTableName(sft)
+    val stIdxTableValue      = formatStIdxTableName(sft)
+    val attrIdxTableValue    = formatAttrIdxTableName(sft)
+    val recordTableValue     = formatRecordTableName(sft)
+    val maxShardValue        = maxShard.toString
+    val dtgFieldValue        = dtgValue.getOrElse(Constants.SF_PROPERTY_START_TIME)
 
     // store each metadata in the associated column family
-    val attributeMap = Map(ATTRIBUTES_CF         -> attributesValue,
-                           SCHEMA_CF             -> schemaValue,
-                           DTGFIELD_CF           -> dtgValue.getOrElse(Constants.SF_PROPERTY_START_TIME),
-                           FEATURE_ENCODING_CF   -> featureEncodingValue,
-                           VISIBILITIES_CF       -> writeVisibilities,
-                           ST_IDX_TABLE_CF       -> stIdxTable,
-                           ATTR_IDX_TABLE_CF     -> attrIdxTable,
-                           RECORD_TABLE_CF       -> recordTable,
-                           ST_IDX_MAX_SHARD_CF   -> maxShard.toString)
+    val attributeMap = Map(ATTRIBUTES_CF        -> attributesValue,
+                           SCHEMA_CF            -> schemaValue,
+                           DTGFIELD_CF          -> dtgFieldValue,
+                           FEATURE_ENCODING_CF  -> featureEncodingValue,
+                           VISIBILITIES_CF      -> writeVisibilities,
+                           ST_IDX_TABLE_CF      -> stIdxTableValue,
+                           ATTR_IDX_TABLE_CF    -> attrIdxTableValue,
+                           RECORD_TABLE_CF      -> recordTableValue,
+                           ST_IDX_MAX_SHARD_CF  -> maxShardValue)
 
     attributeMap.foreach { case (cf, value) =>
       putMetadata(featureName, mutation, cf, value)
@@ -153,8 +153,8 @@ class AccumuloDataStore(val connector: Connector,
 
   type KVEntry = JMap.Entry[Key,Value]
 
-  private def formatRecordTableName(featureType: SimpleFeatureType) = s"${featureType.getTypeName}_records"
-  private def formatStIdxTableName(featureType: SimpleFeatureType) = s"${featureType.getTypeName}_st_idx"
+  private def formatRecordTableName(featureType: SimpleFeatureType)  = s"${featureType.getTypeName}_records"
+  private def formatStIdxTableName(featureType: SimpleFeatureType)   = s"${featureType.getTypeName}_st_idx"
   private def formatAttrIdxTableName(featureType: SimpleFeatureType) = s"${featureType.getTypeName}_attr_idx"
 
   /**
@@ -184,7 +184,7 @@ class AccumuloDataStore(val connector: Connector,
   /**
    * Read SpatioTemporal Index table name from store metadata
    */
-  def getSTIdxMaxShard(featureType: SimpleFeatureType) =
+  def getSTIdxMaxShard(featureType: SimpleFeatureType): Int =
     readMetadataItem(featureType.getTypeName, ST_IDX_MAX_SHARD_CF)
       .getOrElse(throw new RuntimeException(s"Unable to find required metadata property for $ST_IDX_MAX_SHARD_CF")).toInt
 
@@ -196,12 +196,10 @@ class AccumuloDataStore(val connector: Connector,
    * @param featureType
    * @return true if the storage is catalog-style, false if spatiotemporal table only
    */
-  def catalogTableFormat(featureType: SimpleFeatureType) =
+  def catalogTableFormat(featureType: SimpleFeatureType): Boolean =
     readMetadataItem(featureType.getTypeName, ST_IDX_TABLE_CF).nonEmpty
 
-  def createTablesForType(featureType: SimpleFeatureType,
-                          featureEncoding: FeatureEncoding,
-                          maxShard: Int) {
+  def createTablesForType(featureType: SimpleFeatureType, maxShard: Int) {
     val stIdxTable   = formatStIdxTableName(featureType)
     val attrIdxTable = formatAttrIdxTableName(featureType)
     val recordTable  = formatRecordTableName(featureType)
@@ -211,14 +209,12 @@ class AccumuloDataStore(val connector: Connector,
     }
 
     if(!connector.isInstanceOf[MockConnector])
-      configureStIdxTable(maxShard, featureType, stIdxTable, featureEncoding)
+      configureStIdxTable(maxShard, featureType, stIdxTable)
   }
 
   def configureStIdxTable(maxShard: Int,
                           featureType: SimpleFeatureType,
-                          stIdxTable: String,
-                          fe: FeatureEncoding) {
-    val encoder = SimpleFeatureEncoderFactory.createEncoder(fe)
+                          stIdxTable: String) {
 
     val splits = (1 to maxShard).map { i => s"%0${maxShard.toString.length}d".format(i) }.map(new Text(_))
     tableOps.addSplits(stIdxTable, new java.util.TreeSet(splits))
@@ -236,7 +232,7 @@ class AccumuloDataStore(val connector: Connector,
   }
 
   // Computes the schema, checking for the "DEFAULT" flag
-  def computeSchema(featureName: String, maxShard: Int) =
+  def computeSchema(featureName: String, maxShard: Int): String =
     if(indexSchemaFormat.equalsIgnoreCase("DEFAULT"))
       buildDefaultSchema(featureName, maxShard)
     else
@@ -249,9 +245,9 @@ class AccumuloDataStore(val connector: Connector,
    * @param maxShard numerical id of the max shard (creates maxShard + 1 splits)
    */
   def createSchema(featureType: SimpleFeatureType, maxShard: Int) {
-    val computedSchema = computeSchema(getFeatureName(featureType), maxShard)
-    createTablesForType(featureType, featureEncoding, maxShard)
-    writeMetadata(featureType, featureEncoding, computedSchema, maxShard)
+    val actualSchema = computeSchema(getFeatureName(featureType), maxShard)
+    createTablesForType(featureType, maxShard)
+    writeMetadata(featureType, featureEncoding, actualSchema, maxShard)
   }
 
   /**

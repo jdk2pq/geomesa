@@ -75,16 +75,21 @@ abstract class AccumuloFeatureWriter(featureType: SimpleFeatureType,
 
   val NULLBYTE = Array[Byte](0.toByte)
   val connector = ds.connector
-  protected val multiIndex    = ds.catalogTableFormat(featureType)
+
+  /* multiIndex means catalog table + stidx + attrix + record table versus only st table */
+  protected val multiIndex = ds.catalogTableFormat(featureType)
   protected val multiBWWriter = connector.createMultiTableBatchWriter(new BatchWriterConfig)
+
   protected val recordWriter  =
     if(multiIndex)
       multiBWWriter.getBatchWriter(ds.getRecordTableForType(featureType))
     else null
+
   protected val attrIdxWriter =
     if(multiIndex)
       multiBWWriter.getBatchWriter(ds.getAttrIdxTableForType(featureType))
     else null
+
   protected val stIdxWriter = multiBWWriter.getBatchWriter(ds.getSTIdxTableForType(featureType))
 
   def getFeatureType: SimpleFeatureType = featureType
@@ -111,7 +116,6 @@ abstract class AccumuloFeatureWriter(featureType: SimpleFeatureType,
         writeAttrIdx(toWrite)
       }
       writeSTIdx(toWrite)
-
     } else {
       logger.warn("Invalid feature to write:  " + DataUtilities.encodeFeature(toWrite))
       List()
