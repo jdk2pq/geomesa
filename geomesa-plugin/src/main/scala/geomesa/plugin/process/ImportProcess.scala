@@ -41,6 +41,8 @@ class ImportProcess(val catalog: Catalog) extends GeomesaProcess {
 
                @DescribeParameter(
                  name = "numShards",
+                 min = 0,
+                 max= 1,
                  description = "Number of shards to store for this table (defaults to 4)")
                numShards: Integer
               ) = {
