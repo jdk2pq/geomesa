@@ -16,9 +16,11 @@
 
 package geomesa.core.iterators
 
+
 import java.util
 
 import com.vividsolutions.jts.geom.{Geometry, Polygon}
+import geomesa.core._
 import geomesa.core.data.{AccumuloDataStore, SimpleFeatureEncoderFactory}
 import geomesa.core.index._
 import geomesa.core.security.DefaultAuthorizationsProvider
@@ -74,7 +76,7 @@ class SpatioTemporalIntersectingIteratorTest extends Specification {
     val testTable = s"${featureName}_st_idx"
     val schemaEncoding = "%~#s%" + featureName + "#cstr%10#r%0,1#gh%yyyyMM#d::%~#s%1,3#gh::%~#s%4,3#gh%ddHH#d%10#id"
     val featureType: SimpleFeatureType = DataUtilities.createType(featureName, UnitTestEntryType.getTypeSpec)
-    featureType.getUserData.put(SF_PROPERTY_START_TIME, "geomesa_index_start_time")
+    featureType.getUserData.put(SF_PROPERTY_START_TIME, "dtg")
 
     val index = IndexSchema(schemaEncoding, featureType, featureEncoder)
 
@@ -248,9 +250,9 @@ class SpatioTemporalIntersectingIteratorTest extends Specification {
     val c = TestData.setupMockAccumuloTable(entries, numExpectedDataIn)
     val bs = c.createBatchScanner(TestData.testTable, TEST_AUTHORIZATIONS, 5)
 
-    val gf = s"WITHIN(geomesa_index_geometry, ${polygon.toText})"
+    val gf = s"WITHIN(geom, ${polygon.toText})"
     val dt: Option[String] = Option(dtFilter).map(int =>
-      s"(geomesa_index_start_time between '${int.getStart}' AND '${int.getEnd}')"
+      s"(dtg between '${int.getStart}' AND '${int.getEnd}')"
     )
 
     def red(f: String, og: Option[String]) = og match {
@@ -341,8 +343,8 @@ class SpatioTemporalIntersectingIteratorTest extends Specification {
 
   "Large Mock Accumulo with a meaningful attribute-filter" should {
     "return a partial results-set" in {
-      val ecqlFilter = "(not " + SF_PROPERTY_START_TIME +
-        " after 2010-08-08T23:59:59Z) and (not " + SF_PROPERTY_END_TIME +
+      val ecqlFilter = "(not " + DEFAULT_DTG_PROPERTY_NAME +
+        " after 2010-08-08T23:59:59Z) and (not " + DEFAULT_DTG_END_PROPERTY_NAME +
         " before 2010-08-08T00:00:00Z)"
 
       // run this query on regular data

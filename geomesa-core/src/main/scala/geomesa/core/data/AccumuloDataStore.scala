@@ -24,7 +24,7 @@ import com.typesafe.scalalogging.slf4j.Logging
 import geomesa.core
 import geomesa.core.data.AccumuloFeatureWriter.MapReduceRecordWriter
 import geomesa.core.data.FeatureEncoding.FeatureEncoding
-import geomesa.core.index.{Constants, IndexSchema}
+import geomesa.core.index.IndexSchema
 import geomesa.core.security.AuthorizationsProvider
 import org.apache.accumulo.core.client._
 import org.apache.accumulo.core.client.admin.TimeType
@@ -123,7 +123,7 @@ class AccumuloDataStore(val connector: Connector,
     val attrIdxTableValue    = formatAttrIdxTableName(sft)
     val recordTableValue     = formatRecordTableName(sft)
     val maxShardValue        = maxShard.toString
-    val dtgFieldValue        = dtgValue.getOrElse(Constants.SF_PROPERTY_START_TIME)
+    val dtgFieldValue        = dtgValue.getOrElse(core.DEFAULT_DTG_PROPERTY_NAME)
 
     // store each metadata in the associated column family
     val attributeMap = Map(ATTRIBUTES_CF        -> attributesValue,
@@ -624,9 +624,10 @@ class AccumuloDataStore(val connector: Connector,
    */
   override def getSchema(featureName: String): SimpleFeatureType = {
     val sft = DataUtilities.createType(featureName, getAttributes(featureName))
-    val dtgField = readMetadataItem(featureName, DTGFIELD_CF).getOrElse(Constants.SF_PROPERTY_START_TIME)
-    sft.getUserData.put(Constants.SF_PROPERTY_START_TIME, dtgField)
-    sft.getUserData.put(Constants.SF_PROPERTY_END_TIME,   dtgField)
+    val dtgField = readMetadataItem(featureName, DTGFIELD_CF)
+                   .getOrElse(core.DEFAULT_DTG_PROPERTY_NAME)
+    sft.getUserData.put(core.index.SF_PROPERTY_START_TIME, dtgField)
+    sft.getUserData.put(core.index.SF_PROPERTY_END_TIME, dtgField)
     sft
   }
 
