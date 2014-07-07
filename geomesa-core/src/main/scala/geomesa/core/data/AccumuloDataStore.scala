@@ -85,7 +85,7 @@ class AccumuloDataStore(val connector: Connector,
   private val visibilityCheckCache = scala.collection.mutable.Map[(String, String), Boolean]()
 
   // TODO config should be configurable...
-  private val batchWriterConfig =
+  private val metadataBWConfig =
     new BatchWriterConfig().setMaxMemory(10000L).setMaxWriteThreads(10)
 
   private val MetadataRowKeyRegex = (METADATA_TAG + """_(.*)""").r
@@ -294,7 +294,7 @@ class AccumuloDataStore(val connector: Connector,
    * @param mutations
    */
   private def writeMutations(mutations: Mutation*): Unit = {
-    val writer = connector.createBatchWriter(catalogTable, batchWriterConfig)
+    val writer = connector.createBatchWriter(catalogTable, metadataBWConfig)
     for (mutation <- mutations) {
       writer.addMutation(mutation)
     }
