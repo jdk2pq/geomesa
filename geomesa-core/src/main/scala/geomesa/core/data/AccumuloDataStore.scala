@@ -133,8 +133,7 @@ class AccumuloDataStore(val connector: Connector,
                            VISIBILITIES_CF      -> writeVisibilities,
                            ST_IDX_TABLE_CF      -> stIdxTableValue,
                            ATTR_IDX_TABLE_CF    -> attrIdxTableValue,
-                           RECORD_TABLE_CF      -> recordTableValue,
-                           ST_IDX_MAX_SHARD_CF  -> maxShardValue)
+                           RECORD_TABLE_CF      -> recordTableValue)
 
     attributeMap.foreach { case (cf, value) =>
       putMetadata(featureName, mutation, cf, value)
@@ -184,9 +183,13 @@ class AccumuloDataStore(val connector: Connector,
   /**
    * Read SpatioTemporal Index table name from store metadata
    */
-  def getSTIdxMaxShard(featureType: SimpleFeatureType): Int =
-    readMetadataItem(featureType.getTypeName, ST_IDX_MAX_SHARD_CF)
-      .getOrElse(throw new RuntimeException(s"Unable to find required metadata property for $ST_IDX_MAX_SHARD_CF")).toInt
+  def getSTIdxMaxShard(featureType: SimpleFeatureType): Int = {
+    val indexSchemaFmt = readMetadataItem(featureType.getTypeName, SCHEMA_CF)
+      .getOrElse(throw new RuntimeException(s"Unable to find required metadata property for $SCHEMA_CF"))
+    val featureEncoder = getFeatureEncoder(featureType.getTypeName)
+    val indexSchema = IndexSchema(indexSchemaFmt, featureType, featureEncoder)
+    indexSchema.maxShard
+  }
 
   /**
    * Check if this featureType is stored with catalog table format (i.e. a catalog
@@ -670,23 +673,25 @@ class AccumuloDataStore(val connector: Connector,
    *
    * @param numThreads number of threads for the BatchScanner
    */
-  def createBatchScanner(sft: SimpleFeatureType, numThreads: Int): BatchScanner =
-    if(catalogTableFormat(sft))
+  def createSTIdxScanner(sft: SimpleFeatureType, numThreads: Int): BatchScanner = {
+    logger.trace(s"Creating ST batch scanner with $numThreads threads")
+    if (catalogTableFormat(sft))
       connector.createBatchScanner(getSTIdxTableForType(sft), authorizationsProvider.getAuthorizations, numThreads)
     else
       connector.createBatchScanner(catalogTable, authorizationsProvider.getAuthorizations, numThreads)
+  }
 
   /**
    * Create a BatchScanner for the SpatioTemporal Index Table
    */
-  def createBatchScanner(sft: SimpleFeatureType): BatchScanner = {
+  def createSTIdxScanner(sft: SimpleFeatureType): BatchScanner = {
     val numThreads =
       if(catalogTableFormat(sft))
         getSTIdxMaxShard(sft) + 1 // num splits is maxShard + 1
       else
         DEFAULT_STI_SCAN_THREADS
 
-    createBatchScanner(sft, numThreads)
+    createSTIdxScanner(sft, numThreads)
   }
 
   /**
@@ -701,11 +706,13 @@ class AccumuloDataStore(val connector: Connector,
   /**
    * Create a BatchScanner to retrieve only Records (SimpleFeatures)
    */
-  def createRecordScanner(sft: SimpleFeatureType, numThreads: Int = DEFAULT_RECORD_SCAN_THREADS) =
-    if(catalogTableFormat(sft))
+  def createRecordScanner(sft: SimpleFeatureType, numThreads: Int = DEFAULT_RECORD_SCAN_THREADS) = {
+    logger.trace(s"Creating record scanne with $numThreads threads")
+    if (catalogTableFormat(sft))
       connector.createBatchScanner(getRecordTableForType(sft), authorizationsProvider.getAuthorizations, numThreads)
     else
       throw new RuntimeException("Cannot create Attribute Index Scanner for old table format")
+  }
 
   // Accumulo assumes that the failures directory exists.  This function assumes that you have already created it.
   def importDirectory(tableName: String, dir: String, failureDir: String, disableGC: Boolean) {

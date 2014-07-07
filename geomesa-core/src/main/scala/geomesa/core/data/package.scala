@@ -52,7 +52,6 @@ package object data {
   val ST_IDX_TABLE_CF      = new Text("tables.idx.st.name")
   val ATTR_IDX_TABLE_CF    = new Text("tables.idx.attr.name")
   val RECORD_TABLE_CF      = new Text("tables.record.name")
-  val ST_IDX_MAX_SHARD_CF  = new Text("tables.idx.st.maxshard")
   val METADATA_TAG         = "~METADATA"
   val METADATA_TAG_END     = s"$METADATA_TAG~~"
   val EMPTY_STRING         = ""

@@ -170,7 +170,7 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
 
     val range = AccRange.prefix(formatAttrIdxRow(prop, value))
 
-    attributeIndexQuery(dataStore, derivedQuery, filterVisitor, range)
+    attrIdxQuery(dataStore, derivedQuery, filterVisitor, range)
   }
 
   def formatAttrIdxRow(prop: String, lit: String) =
@@ -193,16 +193,16 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
 
     val range = new AccRange(formatAttrIdxRow(prop, lit))
 
-    attributeIndexQuery(dataStore, derivedQuery, filterVisitor, range)
+    attrIdxQuery(dataStore, derivedQuery, filterVisitor, range)
   }
 
   /**
    * Perform scan against the Attribute Index Table and get an iterator returning records from the Record table
    */
-  def attributeIndexQuery(dataStore: AccumuloDataStore,
-                          derivedQuery: Query,
-                          filterVisitor: FilterToAccumulo,
-                          range: AccRange) =
+  def attrIdxQuery(dataStore: AccumuloDataStore,
+                   derivedQuery: Query,
+                   filterVisitor: FilterToAccumulo,
+                   range: AccRange) =
     new CloseableIterator[Entry[Key, Value]] {
 
       logger.trace(s"Scanning attribute table for feature type ${featureType.getTypeName}")
@@ -268,7 +268,7 @@ case class IndexQueryPlanner(keyPlanner: KeyPlanner,
     val oint  = IndexSchema.somewhen(interval)
 
     // set up row ranges and regular expression filter
-    val bs = ds.createBatchScanner(featureType)
+    val bs = ds.createSTIdxScanner(featureType)
     planQuery(bs, filter)
 
     logger.trace("Configuring batch scanner for ST table: " +
