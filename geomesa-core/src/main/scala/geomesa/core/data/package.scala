@@ -23,6 +23,8 @@ import org.apache.hadoop.mapreduce.TaskInputOutputContext
 import org.geotools.data.FeatureWriter
 import org.geotools.factory.Hints.ClassKey
 import org.opengis.feature.simple.{SimpleFeatureType, SimpleFeature}
+import com.vividsolutions.jts.geom.Envelope
+import org.geotools.geometry.jts.JTS
 
 package object data {
 
@@ -47,6 +49,10 @@ package object data {
   val VISIBILITIES_CF      = new Text("visibilities")
   val VISIBILITIES_CHECK_CF = new Text("visibilitiesCheck")
   val DATA_CQ              = new Text("SimpleFeatureAttribute")
+  val SFT_CF               = new Text("SFT")
+  val ST_IDX_TABLE_CF      = new Text("tables.idx.st.name")
+  val ATTR_IDX_TABLE_CF    = new Text("tables.idx.attr.name")
+  val RECORD_TABLE_CF      = new Text("tables.record.name")
   val METADATA_TAG         = "~METADATA"
   val METADATA_TAG_END     = s"$METADATA_TAG~~"
   val EMPTY_STRING         = ""
