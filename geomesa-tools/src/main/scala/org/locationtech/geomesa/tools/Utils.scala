@@ -82,7 +82,9 @@ case class IngestArguments(username: String = null,
                            latAttribute: Option[String] = None,
                            skipHeader: Boolean = false,
                            doHash: Boolean = false,
-                           maxShards: Option[Int] = None )
+                           maxShards: Option[Int] = None,
+                           instanceName: String = null,
+                           zookeepers: String = null)
 
 /* get password trait */
 trait GetPassword {
@@ -109,9 +111,9 @@ trait AccumuloProperties {
     .map(y => (y \ "value").text)
     .head)
     .getOrElse("/accumulo")
-  val instanceIdDir = new Path(instanceDfsDir, "instance_id")
-  val instanceIdStr = ZooKeeperInstance.getInstanceIDFromHdfs(instanceIdDir)
-  val instanceName = new ZooKeeperInstance(UUID.fromString(instanceIdStr), zookeepers).getInstanceName
+  val instanceIdDir = Try(new Path(instanceDfsDir, "instance_id")).getOrElse(null)
+  val instanceIdStr = Try(ZooKeeperInstance.getInstanceIDFromHdfs(instanceIdDir)).getOrElse(null)
+  val instanceName = Try(new ZooKeeperInstance(UUID.fromString(instanceIdStr), zookeepers).getInstanceName).getOrElse(null)
 }
 
 
