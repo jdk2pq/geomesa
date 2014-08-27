@@ -29,6 +29,10 @@ object Tools extends App with Logging {
       c.copy(username = x) } text "Accumulo username" required()
     def passOpt = opt[String]('p', "password") action { (x, c) =>
       c.copy(password = x) } text "Accumulo password" optional()
+    def instanceNameOpt = opt[String]("instance-name") action { (x, c) =>
+      c.copy(instanceName = x) } text "Accumulo instanceName" optional()
+    def zookeepersOpt = opt[String]("zookeepers") action { (x, c) =>
+      c.copy(zookeepers = x) } text "Accumulo zookeepers" optional()
 
     def export = cmd("export") action { (_, c) =>
       c.copy(mode = "export") } text "Export all or a set of features in csv, geojson, gml, or shp format" children(
@@ -49,7 +53,9 @@ object Tools extends App with Logging {
       opt[Int]('m', "maxFeatures").action { (s, c) =>
         c.copy(maxFeatures = s) } optional() hidden(),
       opt[String]('q', "query").action { (s, c) =>
-        c.copy(query = s )} optional() hidden()
+        c.copy(query = s )} optional() hidden(),
+      instanceNameOpt,
+      zookeepersOpt
       )
 
     def describe = cmd("describe") action { (_, c) =>
@@ -57,14 +63,18 @@ object Tools extends App with Logging {
       userOpt,
       passOpt,
       catalogOpt,
-      featureOpt
+      featureOpt,
+      instanceNameOpt,
+      zookeepersOpt
       )
 
     def list = cmd("list") action { (_, c) =>
       c.copy(mode = "list") } text "List the features in the specified Catalog Table" children(
       userOpt,
       passOpt,
-      catalogOpt
+      catalogOpt,
+      instanceNameOpt,
+      zookeepersOpt
       )
 
     def explain = cmd("explain") action { (_, c) =>
@@ -74,7 +84,9 @@ object Tools extends App with Logging {
       catalogOpt,
       featureOpt,
       opt[String]('q', "filter").action { (s, c) =>
-        c.copy(filterString = s) } required() hidden()
+        c.copy(filterString = s) } required() hidden(),
+      instanceNameOpt,
+      zookeepersOpt
       )
 
     def delete = cmd("delete") action { (_, c) =>
@@ -82,7 +94,9 @@ object Tools extends App with Logging {
       userOpt,
       passOpt,
       catalogOpt,
-      featureOpt
+      featureOpt,
+      instanceNameOpt,
+      zookeepersOpt
       )
 
     def create = cmd("create") action { (_, c) =>
@@ -93,7 +107,9 @@ object Tools extends App with Logging {
       featureOpt,
       specOpt,
       opt[String]('d', "default-date").action { (s, c) =>
-        c.copy(defaultDate = s) } optional() hidden()
+        c.copy(defaultDate = s) } optional() hidden(),
+      instanceNameOpt,
+      zookeepersOpt
       )
 
     def ingest = cmd("ingest") text "Ingest a file into GeoMesa" action { (x, c) => c.copy(mode = "ingest") }  children(
@@ -123,7 +139,9 @@ object Tools extends App with Logging {
         } optional(),
         opt[String]("file").action { (s, c) =>
           c.copy(file = s)
-        } required()
+        } required(),
+        instanceNameOpt,
+        zookeepersOpt
         ),
 
       cmd("tsv") action { (_, c) => c.copy(format = "tsv") } text "Ingest a tsv file" children(
@@ -152,7 +170,9 @@ object Tools extends App with Logging {
         } optional(),
         opt[String]("file").action { (s, c) =>
           c.copy(file = s)
-        } required()
+        } required(),
+        instanceNameOpt,
+        zookeepersOpt
         )
       )
 
@@ -371,7 +391,8 @@ case class ScoptArguments(username: String = null, password: String = null,
                           catalog: String = null, maxFeatures: Int = -1, defaultDate: String = null,
                           filterString: String = null, attributes: String = null,
                           lonAttribute: Option[String] = None, latAttribute: Option[String] = None,
-                          query: String = null, skipHeader: Boolean = false)
+                          query: String = null, skipHeader: Boolean = false, instanceName: String = null,
+                          zookeepers: String = null)
 
 
 

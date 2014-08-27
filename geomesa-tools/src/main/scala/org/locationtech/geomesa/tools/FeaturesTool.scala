@@ -47,18 +47,22 @@ class FeaturesTool(config: ScoptArguments, password: String) extends Logging {
     .map(y => (y \ "value").text)
     .head)
     .getOrElse("/accumulo")
-  val instanceIdDir = new Path(instanceDfsDir, "instance_id")
-  val instanceIdStr = ZooKeeperInstance.getInstanceIDFromHdfs(instanceIdDir)
-  val instanceName = new ZooKeeperInstance(UUID.fromString(instanceIdStr), zookeepers).getInstanceName
+  val instanceIdDir = Try(new Path(instanceDfsDir, "instance_id")).getOrElse(null)
+  val instanceIdStr = Try(ZooKeeperInstance.getInstanceIDFromHdfs(instanceIdDir)).getOrElse(null)
+  val instanceName = Try(new ZooKeeperInstance(UUID.fromString(instanceIdStr), zookeepers).getInstanceName).getOrElse(null)
+
+  val instance = if (config.instanceName != null) { config.instanceName } else { instanceName }
+  val zookeepersString = if (config.zookeepers != null) { config.zookeepers }  else { zookeepers  }
+
   val ds: AccumuloDataStore = Try({
     DataStoreFinder.getDataStore(Map(
-      "instanceId" -> instanceName,
-      "zookeepers" -> zookeepers,
-      "user"       -> config.username,
-      "password"   -> password,
-      "tableName"  -> config.catalog)).asInstanceOf[AccumuloDataStore]
+      "instanceId"   -> instance,
+      "zookeepers"   -> zookeepersString,
+      "user"         -> config.username,
+      "password"     -> password,
+      "tableName"    -> config.catalog)).asInstanceOf[AccumuloDataStore]
   }).getOrElse{
-    logger.error("Incorrect username or password. Please try again.")
+    logger.error("Cannot connect to Accumulo. Please check your configuration and try again.")
     sys.exit()
   }
 
@@ -123,8 +127,8 @@ class FeaturesTool(config: ScoptArguments, password: String) extends Logging {
                                                 config.dtField,
                                                 config.query)
         val de = new DataExporter(loadAttributes, Map(
-          "instanceId" -> instanceName,
-          "zookeepers" -> zookeepers,
+          "instanceId" -> instance,
+          "zookeepers" -> zookeepersString,
           "user"       -> config.username,
           "password"   -> password,
           "tableName"  -> config.catalog), config.format)

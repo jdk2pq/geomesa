@@ -21,6 +21,8 @@ import java.util.UUID
 import com.typesafe.scalalogging.slf4j.Logging
 import org.apache.accumulo.core.client.ZooKeeperInstance
 import org.apache.hadoop.fs.Path
+import org.geotools.data.DataStoreFinder
+import org.locationtech.geomesa.core.data.AccumuloDataStore
 
 import scala.util.Try
 import scala.xml.XML
@@ -38,18 +40,26 @@ class Ingest() extends Logging {
     .map(y => (y \ "value").text)
     .head)
     .getOrElse("/accumulo")
-  val instanceIdDir = new Path(instanceDfsDir, "instance_id")
-  val instanceName = new ZooKeeperInstance(UUID.fromString(ZooKeeperInstance.getInstanceIDFromHdfs(instanceIdDir)), zookeepers).getInstanceName
 
-  def getAccumuloDataStoreConf(config: ScoptArguments, password: String) = Map (
-    "instanceId"   ->  instanceName,
-    "zookeepers"   ->  zookeepers,
-    "user"         ->  config.username,
-    "password"     ->  password,
-    "auths"        ->  sys.env.getOrElse("GEOMESA_AUTHS", ""),
-    "visibilities" ->  sys.env.getOrElse("GEOMESA_VISIBILITIES", ""),
-    "tableName"    ->  config.catalog
-  )
+  val instanceIdDir = Try(new Path(instanceDfsDir, "instance_id")).getOrElse(null)
+  val instanceIdStr = Try(ZooKeeperInstance.getInstanceIDFromHdfs(instanceIdDir)).getOrElse(null)
+  val instanceName = Try(new ZooKeeperInstance(UUID.fromString(instanceIdStr), zookeepers).getInstanceName).getOrElse(null)
+
+
+  def getAccumuloDataStoreConf(config: ScoptArguments, password: String) = {
+    val instance = if (config.instanceName != null) { config.instanceName } else { instanceName }
+    val zookeepersString = if (config.zookeepers != null) { config.zookeepers }  else { zookeepers  }
+
+    Map (
+      "instanceId"   ->  instance,
+      "zookeepers"   ->  zookeepersString,
+      "user"         ->  config.username,
+      "password"     ->  password,
+      "auths"        ->  sys.env.getOrElse("GEOMESA_AUTHS", ""),
+      "visibilities" ->  sys.env.getOrElse("GEOMESA_VISIBILITIES", ""),
+      "tableName"    ->  config.catalog
+    )
+  }
 
   def defineIngestJob(config: ScoptArguments, password: String): Boolean = {
     //ensure that geomesa classes are loaded so that the subsequent
