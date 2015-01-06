@@ -3,6 +3,7 @@ package org.locationtech.geomesa.raster.util
 import java.awt.image.{BufferedImage, RenderedImage, WritableRaster}
 import java.awt.{AlphaComposite, Color, Graphics2D}
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+import javax.imageio.ImageTypeSpecifier
 import javax.media.jai.remote.SerializableRenderedImage
 
 import org.geotools.coverage.grid.{GridCoverage2D, GridCoverageFactory}
@@ -62,8 +63,8 @@ object RasterUtils {
   def renderedImageToGridCoverage2d(name: String, image: RenderedImage, env: Envelope): GridCoverage2D =
     defaultGridCoverageFactory.create(name, image, env)
 
-  def getEmptyImage(width: Int = 256, height: Int = 256) = {
-    val emptyImage = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY)
+  def getEmptyImage(width: Int = 256, height: Int = 256, imageTypeSpecifier: Int) = {
+    val emptyImage = new BufferedImage(width, height, imageTypeSpecifier)
     val g2D = emptyImage.getGraphics.asInstanceOf[Graphics2D]
     val save = g2D.getColor
     g2D.setColor(Color.WHITE)
@@ -73,6 +74,14 @@ object RasterUtils {
     emptyImage
   }
 
+  def setDataInImage(raster: Raster, image: BufferedImage, env: Envelope, resx: Double, resy: Double): Unit = {
+    val coverageEnv = raster.referencedEnvelope
+    val coverageImage = raster.chunk
+    val dx = ((coverageEnv.getMinimum(0) - env.getMinimum(0)) / resx).toInt
+    val dy = ((env.getMaximum(1) - coverageEnv.getMaximum(1)) / resy).toInt
+    image.getRaster.setRect(dx, dy, coverageImage.getData)
+  }
+
   def mosaicRasters(rasters: Iterator[Raster], width: Int, height: Int, env: Envelope, resx: Double, resy: Double) = {
     val rescaleX: Double = resx / (env.getSpan(0) / width)
     val rescaleY: Double = resy / (env.getSpan(1) / height)
@@ -80,14 +89,12 @@ object RasterUtils {
     val newHeight: Double = height / rescaleY
     val imageWidth = Math.max(Math.round(newWidth), 1).toInt
     val imageHeight = Math.max(Math.round(newHeight), 1).toInt
-    val image = getEmptyImage(imageWidth, imageHeight)
+    val firstRaster = rasters.next()
+    val image = getEmptyImage(imageWidth, imageHeight, ImageTypeSpecifier.createFromRenderedImage(firstRaster.chunk).getBufferedImageType)
+    setDataInImage(firstRaster, image, env, resx, resy)
     while(rasters.hasNext) {
       val raster = rasters.next()
-      val coverageEnv = raster.referencedEnvelope
-      val coverageImage = raster.chunk
-      val dx = ((coverageEnv.getMinimum(0) - env.getMinimum(0)) / resx).toInt
-      val dy = ((env.getMaximum(1) - coverageEnv.getMaximum(1)) / resy).toInt
-      image.getRaster.setRect(dx, dy, coverageImage.getData)
+      setDataInImage(raster, image, env, resx, resy)
     }
     image
   }
